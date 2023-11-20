@@ -693,8 +693,24 @@ try_nestloop_path(PlannerInfo *root,
 				return;
 			}
 		}
-
-		add_path(joinrel, (Path *)
+		
+		if(enable_leon)
+		{
+			joinrel->savedpaths = lappend(joinrel->savedpaths, (Path *)
+								create_nestloop_path(root,
+														joinrel,
+														jointype,
+														&workspace,
+														extra,
+														outer_path,
+														inner_path,
+														extra->restrictlist,
+														pathkeys,
+														required_outer));
+		}
+		else
+		{
+			add_path(joinrel, (Path *)
 				 create_nestloop_path(root,
 									  joinrel,
 									  jointype,
@@ -705,6 +721,8 @@ try_nestloop_path(PlannerInfo *root,
 									  extra->restrictlist,
 									  pathkeys,
 									  required_outer));
+		}
+		
 	}
 	else
 	{
@@ -867,8 +885,27 @@ try_mergejoin_path(PlannerInfo *root,
 	if (add_path_precheck(joinrel,
 						  workspace.startup_cost, workspace.total_cost,
 						  pathkeys, required_outer))
-	{
-		add_path(joinrel, (Path *)
+	{	
+		if (enable_leon)
+		{
+			joinrel->savedpaths = lappend(joinrel->savedpaths, (Path *)
+								create_mergejoin_path(root,
+														joinrel,
+														jointype,
+														&workspace,
+														extra,
+														outer_path,
+														inner_path,
+														extra->restrictlist,
+														pathkeys,
+														required_outer,
+														mergeclauses,
+														outersortkeys,
+														innersortkeys));
+		}
+		else
+		{
+			add_path(joinrel, (Path *)
 				 create_mergejoin_path(root,
 									   joinrel,
 									   jointype,
@@ -882,6 +919,8 @@ try_mergejoin_path(PlannerInfo *root,
 									   mergeclauses,
 									   outersortkeys,
 									   innersortkeys));
+		}
+	
 	}
 	else
 	{
@@ -1001,8 +1040,25 @@ try_hashjoin_path(PlannerInfo *root,
 	if (add_path_precheck(joinrel,
 						  workspace.startup_cost, workspace.total_cost,
 						  NIL, required_outer))
-	{
-		add_path(joinrel, (Path *)
+	{	
+		if (enable_leon)
+		{
+			joinrel->savedpaths = lappend(joinrel->savedpaths, (Path *)
+								create_hashjoin_path(root,
+													joinrel,
+													jointype,
+													&workspace,
+													extra,
+													outer_path,
+													inner_path,
+													false,	/* parallel_hash */
+													extra->restrictlist,
+													required_outer,
+													hashclauses));
+		}
+		else
+		{
+			add_path(joinrel, (Path *)
 				 create_hashjoin_path(root,
 									  joinrel,
 									  jointype,
@@ -1014,6 +1070,8 @@ try_hashjoin_path(PlannerInfo *root,
 									  extra->restrictlist,
 									  required_outer,
 									  hashclauses));
+		}
+		
 	}
 	else
 	{

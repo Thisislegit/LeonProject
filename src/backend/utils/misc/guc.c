@@ -1167,6 +1167,28 @@ static struct config_bool ConfigureNamesBool[] =
 		NULL, NULL, NULL
 	},
 	{
+		{"enable_leon", PGC_USERSET, QUERY_TUNING_COST,	
+			gettext_noop("Enable the leon optimizer."),
+			gettext_noop("Enables the leon optimizer. When enabled, the variables enable_leon_rewards"
+		" and enable_leon_selection can be used to control whether or not leon records"
+		" query latency or selects query plans."),
+			GUC_EXPLAIN
+		},
+		&enable_leon,
+		false,
+		NULL, NULL, NULL
+	},
+	{
+		{"not_cali", PGC_USERSET, QUERY_TUNING_COST,	
+			gettext_noop("Enable the leon calibration cost."),
+			gettext_noop("Enables the leon optimizer calibration cost "),
+			GUC_EXPLAIN
+		},
+		&not_cali,
+		false,
+		NULL, NULL, NULL
+	},
+	{
 		/* Not for general use --- used by SET SESSION AUTHORIZATION */
 		{"is_superuser", PGC_INTERNAL, UNGROUPED,
 			gettext_noop("Shows whether the current user is a superuser."),
@@ -3553,6 +3575,28 @@ static struct config_int ConfigureNamesInt[] =
 		check_client_connection_check_interval, NULL, NULL
 	},
 
+	{
+		{"leon_port", PGC_USERSET, QUERY_TUNING_COST,
+			gettext_noop("Leon Port in python"),
+			NULL,
+			GUC_EXPLAIN
+		},
+		&leon_port,
+		9999, 1111, INT16_MAX,
+		NULL, NULL, NULL
+	},
+
+	{
+		{"free_size", PGC_USERSET, QUERY_TUNING_COST,
+			gettext_noop("Leon Port in python"),
+			NULL,
+			GUC_EXPLAIN
+		},
+		&free_size,
+		50, 0, INT16_MAX,
+		NULL, NULL, NULL
+	},
+
 	/* End-of-list marker */
 	{
 		{NULL, 0, 0, NULL, NULL}, NULL, 0, 0, 0, NULL, NULL, NULL
@@ -4601,6 +4645,17 @@ static struct config_string ConfigureNamesString[] =
 		check_backtrace_functions, assign_backtrace_functions, NULL
 	},
 
+	{
+		{"leon_query_name", PGC_USERSET, UNGROUPED,
+				gettext_noop("Sets the query name of ML-based execution query."),
+				NULL,
+				GUC_IS_NAME
+		},
+		&leon_query_name,
+		"",
+		check_cluster_name, NULL, NULL
+    },
+
 	/* End-of-list marker */
 	{
 		{NULL, 0, 0, NULL, NULL}, NULL, NULL, NULL, NULL, NULL
@@ -4647,7 +4702,7 @@ static struct config_enum ConfigureNamesEnum[] =
 			NULL
 		},
 		&compute_query_id,
-		COMPUTE_QUERY_ID_AUTO, compute_query_id_options,
+		COMPUTE_QUERY_ID_ON, compute_query_id_options,
 		NULL, NULL, NULL
 	},
 

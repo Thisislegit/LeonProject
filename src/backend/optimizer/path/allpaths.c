@@ -12,7 +12,7 @@
  *
  *-------------------------------------------------------------------------
  */
-
+// #define OPTIMIZER_DEBUG
 #include "postgres.h"
 
 #include <limits.h>
@@ -29,6 +29,7 @@
 #include "nodes/nodeFuncs.h"
 #ifdef OPTIMIZER_DEBUG
 #include "nodes/print.h"
+#include "utils/ruleutils.h"
 #endif
 #include "optimizer/appendinfo.h"
 #include "optimizer/clauses.h"
@@ -49,6 +50,10 @@
 #include "rewrite/rewriteManip.h"
 #include "utils/lsyscache.h"
 
+#include "optimizer/ml_util.h"
+#include "utils/memutils.h"
+#include "optimizer/picknode_util.h"
+
 
 /* results of subquery_is_pushdown_safe */
 typedef struct pushdown_safety_info
@@ -63,13 +68,19 @@ bool		enable_geqo = false;	/* just in case GUC doesn't set it */
 int			geqo_threshold;
 int			min_parallel_table_scan_size;
 int			min_parallel_index_scan_size;
+bool 		enable_leon = false;
+bool		not_cali = false;
+char        *leon_query_name = "";
+char        *leon_host = "localhost";
+int         leon_port = 9999;
+int         free_size = 50;
 
 /* Hook for plugins to get control in set_rel_pathlist() */
 set_rel_pathlist_hook_type set_rel_pathlist_hook = NULL;
 
 /* Hook for plugins to replace standard_join_search() */
 join_search_hook_type join_search_hook = NULL;
-
+PickNodeState *current_picknode_state = NULL;
 
 static void set_base_rel_consider_startup(PlannerInfo *root);
 static void set_base_rel_sizes(PlannerInfo *root);
@@ -2987,7 +2998,8 @@ standard_join_search(PlannerInfo *root, int levels_needed, List *initial_rels)
 {
 	int			lev;
 	RelOptInfo *rel;
-
+	int conn_fd;
+	LeonState *leon_state;
 	/*
 	 * This function cannot be invoked recursively within any one planning
 	 * problem, so join_rel_level[] can't be in use already.
@@ -3008,6 +3020,53 @@ standard_join_search(PlannerInfo *root, int levels_needed, List *initial_rels)
 	root->join_rel_level = (List **) palloc0((levels_needed + 1) * sizeof(List *));
 
 	root->join_rel_level[1] = initial_rels;
+
+	if (enable_leon)
+	{	
+		// When initializing
+		leon_state = palloc(sizeof(LeonState));
+		leon_state->leonContext = AllocSetContextCreate(CurrentMemoryContext,
+												"LeonContext",
+												ALLOCSET_DEFAULT_SIZES);
+		leon_state->leon_host = leon_host;
+		leon_state->leon_port = leon_port;
+
+
+		// Start with 'picknode:{plan[2]};{plan[3]}';
+		if (strncmp(leon_query_name, "picknode:", strlen("picknode:")) == 0)
+		{	
+			char *copy_name = pstrdup(leon_query_name);
+			char ** relnames = NULL;
+			int nrel = 0;
+			char *token1 = strtok(copy_name, ":");
+			char *token2 = strtok(NULL, ";");
+			char *relname = strtok(token2, ",");
+			while (relname != NULL)
+			{
+				// 为新的 relname 分配空间
+				if (relnames == NULL) relnames = (char **)palloc((nrel + 1) * sizeof(char *));
+				relnames = (char **)repalloc(relnames, (nrel + 1) * sizeof(char *));
+				relnames[nrel] = pstrdup(relname);
+
+				nrel++;
+
+				relname = strtok(NULL, ",");
+			}
+
+			current_picknode_state = palloc(sizeof(PickNodeState));
+			current_picknode_state->node_level = nrel;
+			current_picknode_state->node_relids = create_bms_of_relids(root, initial_rels, nrel, relnames);
+
+			// free memory
+			pfree(copy_name);
+			for (int i = 0; i < nrel; i++)
+			{
+				pfree(relnames[i]);
+			}
+			pfree(relnames);
+		}
+	}
+
 
 	for (lev = 2; lev <= levels_needed; lev++)
 	{
@@ -3030,7 +3089,7 @@ standard_join_search(PlannerInfo *root, int levels_needed, List *initial_rels)
 		 * After that, we're done creating paths for the joinrel, so run
 		 * set_cheapest().
 		 */
-		foreach(lc, root->join_rel_level[lev])
+        foreach(lc, root->join_rel_level[lev])
 		{
 			rel = (RelOptInfo *) lfirst(lc);
 
@@ -3045,6 +3104,96 @@ standard_join_search(PlannerInfo *root, int levels_needed, List *initial_rels)
 			if (lev < levels_needed)
 				generate_useful_gather_paths(root, rel, false);
 
+			bool Opt_rel = false;
+			if (enable_leon)
+				Opt_rel = should_leon_optimize(leon_state, lev, levels_needed, root, rel, leon_query_name);
+			if (enable_leon && Opt_rel)
+			{
+				ListCell *p;
+
+                sort_savedpaths_by_cost(rel);
+				keep_first_50_rels(rel, free_size);
+				int length = list_length(rel->savedpaths);
+				
+				conn_fd = connect_to_leon(leon_state->leon_host, leon_state->leon_port);
+				if (conn_fd < 0) {
+					elog(WARNING, "Unable to connect to LEON server %d, inferencing disabled.", leon_state->leon_port);
+					exit(0);
+				}
+
+				write_all_to_socket(conn_fd, START_QUERY_MESSAGE);
+				foreach(p, rel->savedpaths)
+				{
+					Path *path = (Path *)lfirst(p);
+					char* json_plan = plan_to_json(leon_state, root, path, leon_query_name);
+					write_all_to_socket(conn_fd, json_plan);
+					pfree(json_plan);
+				}
+				write_all_to_socket(conn_fd, TERMINAL_MESSAGE);
+
+				//Necessary Information?
+				shutdown(conn_fd, SHUT_WR);
+
+				MemoryContext oldcontext = MemoryContextSwitchTo(leon_state->leonContext);
+				double *calibrations = (double *)palloc0(length * sizeof(double));
+				int picknode_index = 0;
+				// Read Response From LEON
+				get_calibrations(calibrations, lev, length, conn_fd, &picknode_index);
+
+				shutdown(conn_fd, SHUT_RDWR);
+				if (conn_fd > 0) close(conn_fd);
+
+				int32_t curPosition = 0;
+	
+				foreach (p, rel->savedpaths)
+				{
+					Path *path = (Path *)lfirst(p);
+					// path->total_cost = log(path->total_cost) * calibrations[curPosition];
+					path->calibration = calibrations[curPosition];
+					curPosition++;
+				}
+				
+				Assert(curPosition == length);
+				pfree(calibrations);
+				MemoryContextSwitchTo(oldcontext);
+
+				// Delete all unpicked plans other than picknode_index
+				Path *picknode_savepaths = NULL;
+                if (strncmp(leon_query_name, "picknode:", strlen("picknode:")) == 0 && lev == current_picknode_state->node_level)
+                {
+                    picknode_savepaths = (Path *)list_nth(rel->savedpaths, picknode_index);
+                    list_free(rel->savedpaths);
+                    rel->savedpaths = list_make1(picknode_savepaths);
+                }
+			}
+			// Add Path At Last
+
+			//FIXME: Not Really? Assert(rel->pathlist == NIL);
+			if (rel->savedpaths != NIL)
+			{
+				// if (Opt_rel)
+				// {
+				// 	rel->pathlist = list_concat(rel->pathlist, rel->savedpaths);
+				// }
+				// else
+				// {	
+				// 	ListCell *p;
+				// 	foreach(p, rel->savedpaths)
+				// 	{	
+				// 		Path *path = (Path *)lfirst(p);
+				// 		add_path(rel, path);
+				// 	}
+				// }
+				ListCell *p;
+				foreach(p, rel->savedpaths)
+				{	
+					Path *path = (Path *)lfirst(p);
+					add_path(rel, path);
+				}
+				rel->savedpaths = NIL;
+			}
+	
+
 			/* Find and save the cheapest paths for this rel */
 			set_cheapest(rel);
 
@@ -3052,6 +3201,18 @@ standard_join_search(PlannerInfo *root, int levels_needed, List *initial_rels)
 			debug_print_rel(root, rel);
 #endif
 		}
+	}
+
+	if (enable_leon)
+	{
+		// shutdown(conn_fd, SHUT_RDWR);
+		MemoryContextDelete(leon_state->leonContext);
+		if (current_picknode_state)
+		{
+			pfree(current_picknode_state);
+			current_picknode_state = NULL;
+		}
+		pfree(leon_state);
 	}
 
 	/*
@@ -3902,6 +4063,78 @@ generate_partitionwise_join_paths(PlannerInfo *root, RelOptInfo *rel)
  *****************************************************************************/
 
 #ifdef OPTIMIZER_DEBUG
+// typedef struct
+// {
+// 	List	   *rtable;			/* List of RangeTblEntry nodes */
+// 	List	   *rtable_names;	/* Parallel list of names for RTEs */
+// 	List	   *rtable_columns; /* Parallel list of deparse_columns structs */
+// 	List	   *subplans;		/* List of Plan trees for SubPlans */
+// 	List	   *ctes;			/* List of CommonTableExpr nodes */
+// 	AppendRelInfo **appendrels; /* Array of AppendRelInfo nodes, or NULL */
+// 	/* Workspace for column alias assignment: */
+// 	bool		unique_using;	/* Are we making USING names globally unique */
+// 	List	   *using_names;	/* List of assigned names for USING columns */
+// 	/* Remaining fields are used only when deparsing a Plan tree: */
+// 	Plan	   *plan;			/* immediate parent of current expression */
+// 	List	   *ancestors;		/* ancestors of plan */
+// 	Plan	   *outer_plan;		/* outer subnode, or NULL if none */
+// 	Plan	   *inner_plan;		/* inner subnode, or NULL if none */
+// 	List	   *outer_tlist;	/* referent for OUTER_VAR Vars */
+// 	List	   *inner_tlist;	/* referent for INNER_VAR Vars */
+// 	List	   *index_tlist;	/* referent for INDEX_VAR Vars */
+// 	/* Special namespace representing a function signature: */
+// 	char	   *funcname;
+// 	int			numargs;
+// 	char	  **argnames;
+// } deparse_namespace;
+
+// extern void set_simple_column_names(deparse_namespace *dpns);
+
+
+// List *
+// deparse_context_for_path(PlannerInfo *root, List *rtable_names)
+// {
+// 	deparse_namespace *dpns;
+
+// 	dpns = (deparse_namespace *) palloc0(sizeof(deparse_namespace));
+
+// 	/* Initialize fields that stay the same across the whole plan tree */
+// 	dpns->rtable = root->parse->rtable; 
+// 	dpns->rtable_names = rtable_names;
+// 	dpns->subplans = root->glob->subplans;
+// 	dpns->ctes = NIL;
+// 	if (root->glob->appendRelations)
+// 	{
+// 		/* Set up the array, indexed by child relid */
+// 		int			ntables = list_length(dpns->rtable);
+// 		ListCell   *lc;
+
+// 		dpns->appendrels = (AppendRelInfo **)
+// 			palloc0((ntables + 1) * sizeof(AppendRelInfo *));
+// 		foreach(lc, root->glob->appendRelations)
+// 		{
+// 			AppendRelInfo *appinfo = lfirst_node(AppendRelInfo, lc);
+// 			Index		crelid = appinfo->child_relid;
+
+// 			Assert(crelid > 0 && crelid <= ntables);
+// 			Assert(dpns->appendrels[crelid] == NULL);
+// 			dpns->appendrels[crelid] = appinfo;
+// 		}
+// 	}
+// 	else
+// 		dpns->appendrels = NULL;	/* don't need it */
+
+// 	/*
+// 	 * Set up column name aliases.  We will get rather bogus results for join
+// 	 * RTEs, but that doesn't matter because plan trees don't contain any join
+// 	 * alias Vars.
+// 	 */
+// 	set_simple_column_names(dpns);
+
+// 	/* Return a one-deep namespace stack */
+// 	return list_make1(dpns);
+// }
+
 
 static void
 print_relids(PlannerInfo *root, Relids relids)
@@ -3932,7 +4165,20 @@ print_restrictclauses(PlannerInfo *root, List *clauses)
 	{
 		RestrictInfo *c = lfirst(l);
 
-		print_expr((Node *) c->clause, root->parse->rtable);
+		List *rtable_names = NIL;
+		ListCell *lc;
+		foreach(lc, root->parse->rtable)
+		{
+			RangeTblEntry *rte = lfirst(lc);
+			rtable_names = lappend(rtable_names, rte->eref->aliasname);
+		}
+		List * context = deparse_context_for_path(root, rtable_names);
+		// char * str = deparse_expression(c->clause, context, true, false);
+		char * str = deparse_expression_pretty(c->clause, context, true,
+									 false, true, 0);
+		printf("%s", str);
+		if (str)
+			pfree(str);
 		if (lnext(clauses, l))
 			printf(", ");
 	}
@@ -4136,6 +4382,24 @@ print_path(PlannerInfo *root, Path *path, int indent)
 		printf("  pathkeys: ");
 		print_pathkeys(path->pathkeys, root->parse->rtable);
 	}
+	if (path->pathtarget)
+	{	
+		for (i = 0; i < indent; i++)
+			printf("\t");
+		printf("  pathtargets: (");
+		PathTarget *pathtarget = path->pathtarget;
+        ListCell *lc_expr;
+		bool first = true;
+        foreach(lc_expr, pathtarget->exprs) {
+			if (!first)
+				printf(", ");
+            Node *expr = (Node *) lfirst(lc_expr);
+            print_expr(expr, root->parse->rtable);
+			first = false;
+        }
+		printf(")");
+		printf("\n");
+	}
 
 	if (join)
 	{
@@ -4168,6 +4432,54 @@ print_path(PlannerInfo *root, Path *path, int indent)
 }
 
 void
+print_joincond(PlannerInfo *root, RelOptInfo *rel)
+{
+	ListCell   *lc;
+	List *rtable = root->parse->rtable;
+
+	if (rel->reloptkind != RELOPT_JOINREL)
+		return;
+
+	printf("join conditions: ");
+	bool first = true;
+	foreach(lc, root->parse->jointree->quals)
+	{
+		Node *expr = (Node *) lfirst(lc);
+		if IsA(expr, OpExpr)
+		{	
+			const OpExpr *e = (const OpExpr *) expr;
+			char	   *opname;
+
+			opname = get_opname(e->opno);
+			if (list_length(e->args) > 1)
+			{	
+				Node * left_node = get_leftop((const Expr *) e);
+				Node * right_node = get_rightop((const Expr *) e);
+				if (IsA(left_node, Var) && IsA(right_node, Var))
+				{	
+					Var *left_var = (Var *) left_node;
+					Var *right_var = (Var *) right_node;
+					//Both vars are from the same relation
+					if (bms_is_member(left_var->varno, rel->relids) &&
+						bms_is_member(right_var->varno, rel->relids))
+					{	
+						if (!first)
+							printf(", ");
+						print_expr(left_node, rtable);
+						printf(" %s ", ((opname != NULL) ? opname : "(invalid operator)"));
+						print_expr(right_node, rtable);
+						first = false;
+					}
+				}
+			}		
+		}
+	}
+
+	printf("\n");
+}
+
+
+void
 debug_print_rel(PlannerInfo *root, RelOptInfo *rel)
 {
 	ListCell   *l;
@@ -4182,7 +4494,9 @@ debug_print_rel(PlannerInfo *root, RelOptInfo *rel)
 		print_restrictclauses(root, rel->baserestrictinfo);
 		printf("\n");
 	}
-
+	
+	print_joincond(root, rel);
+	
 	if (rel->joininfo)
 	{
 		printf("\tjoininfo: ");

@@ -770,6 +770,7 @@ typedef struct RelOptInfo
 	Relids		all_partrels;	/* Relids set of all partition relids */
 	List	  **partexprs;		/* Non-nullable partition key expressions */
 	List	  **nullable_partexprs; /* Nullable partition key expressions */
+	List	  *savedpaths;		/* Saved paths for ML estimation */
 } RelOptInfo;
 
 /*
@@ -1189,7 +1190,8 @@ typedef struct Path
 	double		rows;			/* estimated number of result tuples */
 	Cost		startup_cost;	/* cost expended before fetching any tuples */
 	Cost		total_cost;		/* total cost (assuming all tuples fetched) */
-
+	Cost        calibration;
+	
 	List	   *pathkeys;		/* sort ordering of path's output */
 	/* pathkeys is a List of PathKey nodes; see above */
 } Path;

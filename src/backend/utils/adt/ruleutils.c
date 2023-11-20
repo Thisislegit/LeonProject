@@ -327,7 +327,7 @@ bool		quote_all_identifiers = false;
  * as a parameter, and append their text output to its contents.
  * ----------
  */
-static char *deparse_expression_pretty(Node *expr, List *dpcontext,
+char *deparse_expression_pretty(Node *expr, List *dpcontext,
 									   bool forceprefix, bool showimplicit,
 									   int prettyFlags, int startIndent);
 static char *pg_get_viewdef_worker(Oid viewoid,
@@ -358,7 +358,7 @@ static void set_rtable_names(deparse_namespace *dpns, List *parent_namespaces,
 							 Bitmapset *rels_used);
 static void set_deparse_for_query(deparse_namespace *dpns, Query *query,
 								  List *parent_namespaces);
-static void set_simple_column_names(deparse_namespace *dpns);
+void set_simple_column_names(deparse_namespace *dpns);
 static bool has_dangerous_join_using(deparse_namespace *dpns, Node *jtnode);
 static void set_using_names(deparse_namespace *dpns, Node *jtnode,
 							List *parentUsing);
@@ -3530,7 +3530,7 @@ deparse_expression(Node *expr, List *dpcontext,
  * The result is a palloc'd string.
  * ----------
  */
-static char *
+char *
 deparse_expression_pretty(Node *expr, List *dpcontext,
 						  bool forceprefix, bool showimplicit,
 						  int prettyFlags, int startIndent)
@@ -3939,7 +3939,7 @@ set_deparse_for_query(deparse_namespace *dpns, Query *query,
  * need to (note that EXPLAIN should never see join alias Vars anyway).
  * If we do hit a join RTE we'll just process it like a non-table base RTE.
  */
-static void
+void
 set_simple_column_names(deparse_namespace *dpns)
 {
 	ListCell   *lc;

@@ -22,6 +22,8 @@
 #include "partitioning/partbounds.h"
 #include "utils/memutils.h"
 
+#include "optimizer/picknode_util.h"
+
 
 static void make_rels_by_clause_joins(PlannerInfo *root,
 									  RelOptInfo *old_rel,
@@ -691,6 +693,7 @@ make_join_rel(PlannerInfo *root, RelOptInfo *rel1, RelOptInfo *rel2)
 	SpecialJoinInfo sjinfo_data;
 	RelOptInfo *joinrel;
 	List	   *restrictlist;
+	int current_level = root->join_cur_level;
 
 	/* We should never try to join two overlapping sets of rels. */
 	Assert(!bms_overlap(rel1->relids, rel2->relids));
@@ -699,6 +702,21 @@ make_join_rel(PlannerInfo *root, RelOptInfo *rel1, RelOptInfo *rel2)
 	joinrelids = bms_union(rel1->relids, rel2->relids);
 
 	/* Check validity and determine join type. */
+	if (current_picknode_state)
+	{
+		if(current_level > current_picknode_state->node_level)
+		{
+			if(!bms_is_subset(current_picknode_state->node_relids, rel1->relids))
+				return NULL;
+		}
+		else if(current_level == current_picknode_state->node_level)
+		{
+			if (!bms_equal(current_picknode_state->node_relids, joinrelids))
+				return NULL;
+		}
+	}
+
+
 	if (!join_is_legal(root, rel1, rel2, joinrelids,
 					   &sjinfo, &reversed))
 	{
