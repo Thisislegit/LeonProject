@@ -116,4 +116,3 @@ dependencies:
       - wcwidth==0.2.12
       - yarl==1.9.3
       - zipp==3.17.0
-prefix: /data1/chenx/softwares/miniconda3/envs/leon
