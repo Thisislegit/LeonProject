@@ -4,7 +4,7 @@
   <img src="Figs/leon.jpg", alt="LEON" />
 </div> -->
 <p align="center">
-  <img src="Figs/leon.jpg" alt="LEON" style="width:50%;" />
+  <img src="Figs/leon.jpg" alt="LEON" style="width:100%;" />
 <p>
 
 
@@ -34,8 +34,8 @@ cd ./contrib/pg_prewarm
 make && make install
 cd ../../
 
-# 3. use the correct configuration.
-cp ./LEON/conf/LEON-postgresql.conf ～/pg_install/bin/postgresql.conf
+# 3. use the correct configuration (after initialization).
+cp ./LEON/conf/LEON-postgresql.conf ～/pg_install/MyData/postgresql.conf
 ```
 
 **2. Load Dataset**
