@@ -15,6 +15,8 @@ Due to the absence of native hook functions for interfacing, this repository fac
 This is Pytorch implementation of the paper: [LEON: A New Framework for ML-Aided Query Optimization](https://www.vldb.org/pvldb/vol16/p2261-chen.pdf). For technique details, please refer to the paper.
 
 
+
+
 ## Setup
 
 **1. PostgreSQL**
@@ -114,7 +116,6 @@ bash run.sh
 This takes about 10 seconds, you can see message like 
 
 ```
-
 ... Connected to Ray cluster
 Read Workload: job_training
 Init LeonModel Finish 
@@ -124,12 +125,11 @@ Init SimpleLeonModel Finish
 ```
 After that you can run queries on PostgreSQL client psql or run our training script:
 ```bash
-python leon_trainer.py
-```
-
 # Start the trainer
 python leon_trainer.py
 ```
+
+
 
 ## Detail Configurations
 
@@ -172,7 +172,39 @@ To reproduce on `job_training` dataset, load the ckpt in `models`
 model, dnn_model = load_model(model_path, queryFeaturizer, nodeFeaturizer, ckpt=True)
 ```
 
-![Alt text](Figs/job_training_1.jpg)
+
+<p align="center">
+  <img src="Figs/job_training_1.jpg" alt="JOB_training" style="width:50%;" />
+<p>
+
+## Citation
+If you find this repository useful in your research, please at least cite the following paper and the source code:
+
+
+- Xu Chen, Haitian Chen, Zibo Liang, Shuncheng Liu, Jinghong Wang, Kai Zeng, Han Su, Kai Zheng*: [LEON: A New Framework for ML-Aided Query Optimization](https://www.vldb.org/pvldb/vol16/p2261-chen.pdf). VLDB 2023
+
+
+```
+@article{chen2023leon,
+  title={Leon: A new framework for ml-aided query optimization},
+  author={Chen, Xu and Chen, Haitian and Liang, Zibo and Liu, Shuncheng and Wang, Jinghong and Zeng, Kai and Su, Han and Zheng, Kai},
+  journal={Proceedings of the VLDB Endowment},
+  volume={16},
+  number={9},
+  pages={2261--2273},
+  year={2023},
+  publisher={VLDB Endowment}
+}
+```
+
+```
+@misc{leon_github,
+  howpublished = {\url{https://github.com/Thisislegit/LeonProject}},
+  title =        "Leon source code",
+  year =         2024
+}
+```
+
 
 ## Acknowledgements
 This project builds on top of [`Balsa`](https://github.com/balsa-project/balsa) and [`Bao`](https://github.com/learnedsystems/BaoForPostgreSQL). Thanks for their groundbreaking efforts and contributions to the field.
