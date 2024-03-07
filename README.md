@@ -105,8 +105,27 @@ There are two main files that implement LEON's functionality: `leon_server.py` a
 
 To start the experiment, run the following command.
 ```bash
+cd ./LEON
+
 # This will restart start multiple PostgreSQL (optional), prewarm them (optional) and start the leon_server
 bash run.sh 
+```
+
+This takes about 10 seconds, you can see message like 
+
+```
+
+... Connected to Ray cluster
+Read Workload: job_training
+Init LeonModel Finish 
+... Connected to Ray cluster
+Read Workload: job_training
+Init SimpleLeonModel Finish
+```
+After that you can run queries on PostgreSQL client psql or run our training script:
+```bash
+python leon_trainer.py
+```
 
 # Start the trainer
 python leon_trainer.py

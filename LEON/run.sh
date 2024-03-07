@@ -33,5 +33,5 @@ rm messages.pkl
 cd ..
 
 # Start the server
-python leon_server_.py
+python leon_server.py
 
