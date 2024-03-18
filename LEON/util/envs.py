@@ -11,6 +11,8 @@ import re
 import torch
 import sys
 sys.path.append('..')
+from config import read_config
+conf = read_config()
 
 _EPSILON = 1e-6
 
@@ -246,7 +248,7 @@ class JoinOrderBenchmark_Train(JoinOrderBenchmark):
         #  p.query_dir = os.path.join('/home/ht/PycharmProjects/pythonProject3', 'join-order-benchmark')
         module_dir = os.path.abspath(os.path.dirname(__file__)) + '/../'    
         print(module_dir)
-        p.query_dir = os.path.join(module_dir + './workloads/training_query/job_train.txt')
+        p.query_dir = os.path.join(module_dir + f'./workloads/training_query/{conf["leon"]["workload_type"]}.txt')
         if not os.path.exists(p.query_dir):
             raise IOError('File Not Exists!')
         return p
@@ -405,7 +407,7 @@ def wordload_init(workload_type):
     path = f'./log/workload_{workload_type}.pkl'
     
     if not os.path.exists(path):
-        if workload_type == 'job_training':
+        if workload_type == 'job_train' or workload_type == 'tpch_train' or workload_type == 'stack_train':
             workload = JoinOrderBenchmark_Train(JoinOrderBenchmark_Train.Params())
         else:
             workload = JoinOrderBenchmark(JoinOrderBenchmark.Params())
@@ -427,8 +429,8 @@ def CurrCache(curr_exec, plan):
     return False
 
 def load_train_files(workload_type):
-    if workload_type == 'job_training':
-        training_query = load_training_query("./workloads/training_query/job_train.txt")
+    if workload_type == 'job_train' or workload_type == 'tpch_train' or workload_type == 'stack_train':
+        training_query = load_training_query(f"./workloads/training_query/{workload_type}.txt")
         train_files = [i[0] for i in training_query]
         training_query = [i[1] for i in training_query]
     else:
@@ -455,7 +457,7 @@ def find_alias(training_query):
         from_where_content = re.search('FROM(.*)WHERE', sql_query.replace("\n", "")).group(1)
 
         # 提取别名
-        aliases = re.findall(r'AS (\w+)', from_where_content)
+        aliases = re.findall(r'AS (\w+)', from_where_content, re.IGNORECASE)
         
         aliases = ",".join(sorted(aliases))
         a.append(aliases)

@@ -170,7 +170,8 @@ class Node(object):
         aliases = self.leaf_ids(alias_only=True)
 
         def _KeepRelevantJoins(s):
-            splits = s.split('=')
+            splits = re.split(r'[=><]', s)
+            splits = list(filter(None, splits))
             l, r = splits[0].strip(), splits[1].strip()
     
             l_alias = l.split('.')[0]
@@ -362,6 +363,7 @@ class WorkloadInfo(object):
         join_types = set()
         all_ops = set()
         all_ops.add('Null')
+        all_ops.add('Memoize')
         all_attributes = set()
         mins = {"cost": float("inf"), "card": float("inf"), "width": float("inf")}
         maxs = {"cost": -float("inf"), "card": -float("inf"), "width": -float("inf")}
