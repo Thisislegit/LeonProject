@@ -59,10 +59,12 @@ def load_model(model_path: str, queryfeaturizer, nodefeaturizer, ckpt=False):
                 treeconv.ResidualBlock, 
                 [1, 1, 1, 1]).to(DEVICE)
             print(f"Model size: ({queryfeaturizer.Dim()}, {nodefeaturizer.Dim()})")
-        dnn_model = DNN(77, [512, 256, 128], 2)
+        dnn_model = DNN(len(list(plan_channels_init.values())[0].values()) * len(plan_channels_init.keys()), [512, 256, 128], 2)
+        print(f"DNN Model size: ({len(list(plan_channels_init.values())[0].values()) * len(plan_channels_init.keys())}, [512, 256, 128], 2)")
         torch.save(dnn_model, "./log/dnn_model.pth")
         dnn_model = PL_DNN(dnn_model)
         torch.save(model, model_path)
+        model = PL_Leon(model, prev_optimizer_state_dict)
     else:
         assert ckpt == True
         dnn_model = torch.load("./models/dnn.pth", map_location=DEVICE).to(DEVICE)
@@ -509,29 +511,11 @@ if __name__ == '__main__':
                 collects(
                     curNode, task_counter, Exp, curr_file[q_send_cnt], model, tf_time[q_send_cnt]
                 )
-        exp_key = Exp.GetExpKeys()
-        
         for q_send_cnt in range(chunk_size):
-            curNode = Nodes[q_send_cnt]
-            if curNode:
-                curNode.info['sql_str'] = sqls_chunk[q_send_cnt]
-                curNode.GetOrParseSql()
-                allPlans = [curNode]
-                while (allPlans):
-                    currentNode = allPlans.pop(0)
-                    allPlans.extend(currentNode.children)
-                    if currentNode.IsJoin():
-                        cur_join_ids = ','.join(
-                            sorted([i.split(" AS ")[-1] for i in currentNode.leaf_ids()]))
-                        if cur_join_ids in exp_key:
-                            currentNode.info['sql_str'] = currentNode.to_sql(
-                                curNode.info['parsed_join_conds'], with_select_exprs=True)
-                            # Make sure the plan space is consecutive
-                            ConsecutivePlanning(currentNode.info['sql_str'], curr_file[q_send_cnt])
-                            # Write message to collect experience (without execution)
-                            ray.get(task_counter.WriteOnline.remote(True))
-                            ConsecutivePlanning(currentNode.info['sql_str'], curr_file[q_send_cnt])
-                            ray.get(task_counter.WriteOnline.remote(False))
+            postgres.getPlans(sqls_chunk[q_send_cnt], None, check_hint_used=False, ENABLE_LEON=True, curr_file=curr_file[q_send_cnt])
+            ray.get(task_counter.WriteOnline.remote(True))
+            postgres.getPlans(sqls_chunk[q_send_cnt], None, check_hint_used=False, ENABLE_LEON=True, curr_file=curr_file[q_send_cnt])
+            ray.get(task_counter.WriteOnline.remote(False)) 
 
         ##########################################################
         # If the newly executed node is from the same eqset,
@@ -600,7 +584,7 @@ if __name__ == '__main__':
                                                     workload=workload, 
                                                     queryFeaturizer=queryFeaturizer, 
                                                     nodeFeaturizer=nodeFeaturizer, 
-                                                    sql=None)
+                                                    sql=sqls_chunk[q_recieved_cnt])
     
                     if nodes is None:
                         continue
