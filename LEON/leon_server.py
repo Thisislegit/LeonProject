@@ -360,7 +360,7 @@ class LeonModel:
         try:
             # Write the message to a file, at the offline mode
             # We only need to write the message to a file
-            if ray.get(self.communicator.GetOnline.remote()) and self.Current_Level == self.Levels_Needed:
+            if ray.get(self.communicator.GetOnline.remote()):
                 self.communicator.Add_task.remote()
                 self.writer_hander.write_file.remote(X)
         except:
